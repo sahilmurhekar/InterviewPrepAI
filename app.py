@@ -7,7 +7,7 @@ import re
 import traceback
 
 # Set page configuration (title and favicon)
-st.set_page_config(page_title="Interview Prep AI", page_icon="🤖")
+st.set_page_config(page_title="Interview Prep AI", page_icon="🤖", layout="wide")
 
 # Configure the Google Generative AI API
 genai.configure(api_key='AIzaSyAfBnFjJ-80s7iy71wLVGNh2q3NccSjVo0')  # Replace with your actual API key
@@ -19,7 +19,24 @@ generation_config = {
     "top_k": 64,
     "max_output_tokens": 8192,
 }
+def extract_text_from_pdf(pdf_path):
+    with fitz.open(pdf_path) as doc:
+        text = ""
+        for page in doc:
+            text += page.get_text()
+    return text
 
+def clear_uploads_directory(upload_dir="uploads/"):
+    if not os.path.exists(upload_dir):
+        os.makedirs(upload_dir)
+    for filename in os.listdir(upload_dir):
+        file_path = os.path.join(upload_dir, filename)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)  # Remove file
+        except Exception as e:
+            st.error(f"Error removing {file_path}: {str(e)}")
+            
 # Initialize the generative model
 model = genai.GenerativeModel(
     model_name="gemini-1.5-pro",
@@ -118,8 +135,37 @@ Provide a detailed evaluation in this JSON format:
 
 # Main Streamlit App
 def main():
+    # Clear the uploads directory when the app is refreshed
+    clear_uploads_directory()
+
     st.title("🚀 Interview Prep AI")
     st.markdown("Your AI companion for interview preparation")
+
+    # Sidebar for Resume Upload
+    st.sidebar.header("📄 Upload Resume")
+    resume_file = st.sidebar.file_uploader("Upload your resume (PDF)", type=["pdf"])
+    
+    # Initialize resume_text in session state if not present
+    if 'resume_text' not in st.session_state:
+        st.session_state.resume_text = ""
+    
+    if resume_file:
+        try:
+            # Save the uploaded resume
+            resume_path = os.path.join("uploads", resume_file.name)
+            with open(resume_path, "wb") as f:
+                f.write(resume_file.getbuffer())
+
+            # Extract text from the resume
+            st.session_state.resume_text = extract_text_from_pdf(resume_path)
+            st.sidebar.success("✅ Resume uploaded successfully!")
+            
+            # Show a preview of the extracted text
+            with st.sidebar.expander("Resume Content Preview"):
+                st.write(st.session_state.resume_text[:500] + "...")
+                
+        except Exception as e:
+            st.sidebar.error(f"Error processing resume: {str(e)}")
 
     # Main content area
     tab1, tab2 = st.tabs(["Interview Prep", "Normal Chat"])
@@ -142,12 +188,17 @@ def main():
                 st.warning("Please enter job description or tech stack")
                 return
             
-            # Generate questions
+            # Include resume context if available
+            context = ""
+            if st.session_state.resume_text:
+                context = f"\nCandidate's Resume Context: {st.session_state.resume_text}"
+            
+            # Generate questions with resume context if available
             st.session_state.job_role = job_role
             st.session_state.interview_questions = generate_interview_questions(
                 job_role, 
                 job_experience, 
-                job_description
+                job_description + context
             )
             
             # Ensure questions were generated
@@ -161,7 +212,7 @@ def main():
                 st.write(f"**Q{i}:** {q['question']}")
                 st.write(f"*Difficulty:* {q['difficulty']} | *Focus:* {q['focus']}")
 
-        # Answer the questions
+        # Answer and evaluation section (previous implementation remains the same)
         if hasattr(st.session_state, 'interview_questions'):
             st.subheader("Your Answers")
             
@@ -183,33 +234,33 @@ def main():
                 # Extract questions text
                 questions_text = [q['question'] for q in st.session_state.interview_questions]
                 
+                # Include resume context in evaluation if available
+                context = ""
+                if st.session_state.resume_text:
+                    context = f"\nCandidate's Resume Context: {st.session_state.resume_text}"
+                
                 # Get evaluation
                 evaluation = evaluate_interview_answers(
-                    st.session_state.job_role, 
+                    st.session_state.job_role + context, 
                     questions_text, 
                     st.session_state.interview_answers
                 )
                 
-                # Display evaluation results
+                # Display evaluation results (previous implementation remains the same)
                 if evaluation:
-                    # Overall Performance
                     st.subheader("🎯 Interview Performance")
                     st.metric("Overall Rating", f"{evaluation.get('overall_rating', 'N/A')}/10")
                     
-                    # Overall Feedback
                     st.write("**Overall Feedback:**")
                     st.write(evaluation.get('overall_feedback', 'No overall feedback available.'))
                     
-                    # Detailed Question Feedback
                     st.subheader("Detailed Question Feedback")
                     
                     for i, feedback in enumerate(evaluation.get('detailed_feedback', []), 1):
                         with st.expander(f"Q{i} Detailed Analysis"):
-                            # Question Details
                             st.write(f"**Original Question:** {st.session_state.interview_questions[i-1]['question']}")
                             st.write(f"**Your Answer:** {st.session_state.interview_answers[i-1]}")
                             
-                            # Evaluation Details
                             st.write(f"**Answer Rating:** {feedback.get('answer_rating', 'N/A')}/10")
                             st.write("**Strengths:**")
                             st.write(feedback.get('strengths', 'No specific strengths noted.'))
@@ -220,35 +271,31 @@ def main():
                             st.write("**Suggested Answer Framework:**")
                             st.write(feedback.get('suggested_answer_framework', 'No specific framework provided.'))
 
-    # Normal Chat Tab remains the same as in previous implementation
+    # Normal Chat Tab (remains the same)
     with tab2:
         st.header("Normal Chat")
-        # Initialize chat history
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
         
-        # Initialize chat session
         if 'chat_session' not in st.session_state:
             st.session_state.chat_session = model.start_chat(history=[])
 
-        # Display previous messages
         for message in st.session_state.chat_history:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        # Chat input
         if prompt := st.chat_input("What would you like to chat about?"):
-            # Display user message
             st.chat_message("user").markdown(prompt)
 
             try:
-                # Send message to AI
-                response = st.session_state.chat_session.send_message(prompt)
-
-                # Display AI response
+                # Include resume context in chat if available
+                context = prompt
+                if st.session_state.resume_text:
+                    context = f"Context from resume: {st.session_state.resume_text}\n\nUser question: {prompt}"
+                
+                response = st.session_state.chat_session.send_message(context)
                 st.chat_message("assistant").markdown(response.text)
 
-                # Update chat history
                 st.session_state.chat_history.append({
                     "role": "user", 
                     "content": prompt
