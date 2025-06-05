@@ -39,7 +39,7 @@ def clear_uploads_directory(upload_dir="uploads/"):
             
 # Initialize the generative model
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro",
+    model_name="gemini-2.0-flash",
     generation_config=generation_config,
 )
 
